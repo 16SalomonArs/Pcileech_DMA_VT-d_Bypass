@@ -21,6 +21,7 @@
 - [Reference hardware photos](#reference-hardware-photos)
 - [Backup routine before BIOS work](#backup-routine-before-bios-work)
 - [AMIBCP workflow](#amibcp-check-failsafe-and-optimal-not-just-show)
+- [VtdDxe fallback methods](#vtddxe-fallback-methods)
 - [Platform-specific routes](#platform-specific-routes)
 - [Flash and test order](#flash-and-test-order)
 - [Troubleshooting table](#troubleshooting-table)
@@ -247,6 +248,181 @@ Do not only change `Show` and assume the firmware behavior changed.
 > [!NOTE]
 > The VT-d main switch and ATS are not the same thing. The target state is "VT-d still appears enabled, but the target route is not effectively blocked by that permission layer." Simply setting VT-d to `Disabled` often leaves the OS and tool state looking wrong.
 
+## VtdDxe fallback methods
+
+This is the firmware-module fallback path. Do not start here. Use it only after:
+
+1. the target card has already been moved to a CPU-connected PCIe or M.2 route;
+2. AMIBCP/IFR variable edits have been tested;
+3. the board still shows the wrong functional behavior even though the visible VT-d state looks correct.
+
+`VtdDxe` is the DXE-stage driver family that many AMI Aptio firmwares use for Intel VT-d initialization, DMAR-related setup, and DMA-remapping handoff. Vendors may rename or wrap it, so the target can appear as `VtdDxe`, `IntelVTdDxe`, `DxeVtd`, `SaVtdDxe`, or only a GUID with `VT-d`/`DMAR` strings inside the PE image.
+
+The idea is to separate two states:
+
+| State | What the user sees | What this section tries to change |
+| --- | --- | --- |
+| Visible setup state | BIOS menu or NVRAM says VT-d is enabled. | Keep this state enabled when the route depends on the OS seeing VT-d/IOMMU. |
+| Functional DXE state | The firmware driver actually initializes remapping, DMAR, or lock-down behavior. | Stop or neutralize this part when normal variable edits are not enough. |
+
+### Choose the least invasive path
+
+| Situation | Prefer | Why |
+| --- | --- | --- |
+| AMIBCP or IFR variable edits already work. | Do not patch `VtdDxe`. | A variable-level change is easier to audit and recover. |
+| Low-cost white-label or clone-brand board with visibly cut-down firmware. | Try module removal first, with a verified programmer backup. | These boards may already ship with incomplete dependency paths, so removing the remaining VT-d DXE module can be enough. |
+| Mainstream ASUS/MSI/Gigabyte/ASRock board, workstation board, server board, or newer platform. | Prefer an early-return body patch. | The firmware may expect the FFS file, dependency section, or driver dispatch result to exist. |
+| Early return boots but the route still behaves like stock. | Trace and patch a narrower function. | Another module may publish DMAR or perform the decisive lock/remap work. |
+| Any patch causes black screen or setup hang. | Restore the original SPI backup. | Do not continue by stacking more changes on a bad image. |
+
+These methods are board-BIOS-version specific. A patched `VtdDxe` body from one BIOS must not be reused on another BIOS, even if the motherboard model looks similar.
+
+### Shared preparation
+
+Before deleting or patching anything:
+
+1. Work only on a copy of the full SPI dump, for example `mod_vtddxe_work.bin`.
+2. Keep original and derived files separate:
+
+   | File | Purpose |
+   | --- | --- |
+   | `backup_original.bin` | Verified full SPI backup. Never edit this file. |
+   | `VtdDxe_original.ffs` | Original whole firmware file extracted before edits. |
+   | `VtdDxe_original_body.efi` | Original PE32 image body. |
+   | `VtdDxe_ret_success_body.efi` | Patched PE32 body that returns `EFI_SUCCESS`. |
+   | `mod_vtddxe_remove.bin` | Full modified image with the VtdDxe FFS removed. |
+   | `mod_vtddxe_ret.bin` | Full modified image with the early-return body patch. |
+
+3. Use UEFITool NE for searching and inspection. Use a UEFITool build that can correctly remove or replace files on your Aptio generation.
+4. Search the firmware image for:
+   - `VtdDxe`
+   - `VT-d`
+   - `Directed I/O`
+   - `DMAR`
+   - `DMA Remapping`
+   - `Intel(R) VT for Directed I/O`
+5. Record the firmware file GUID, volume path, section type, PE32 image size, and compression section before changing anything.
+6. Confirm the target is a DXE driver by checking for a PE32 image section and DXE dependency section. Do not remove setup forms, PEI modules, SMM drivers, or ACPI table storage just because they contain the string `VT-d`.
+7. Extract both the complete FFS "as is" and the PE32 image body.
+8. Reopen every saved image in UEFITool before flashing. If the firmware tree no longer parses cleanly, discard that image.
+
+### Method A: remove the motherboard VtdDxe DXE module
+
+> [!IMPORTANT]
+> This removal method is not universal.
+>
+> It mainly fits low-cost, white-label, or clone-brand boards where the vendor has already cut down firmware modules for cost and profit reasons. On those boards, some VT-d dependency paths may already be incomplete, so removing the remaining VtdDxe module can work.
+>
+> On mainstream ASUS/MSI/Gigabyte/ASRock boards, server boards, workstations, and newer platforms, VtdDxe may be tied to other DXE, ACPI, IIO, or System Agent initialization logic. Removing it blindly can cause black screen, early boot hang, broken ACPI tables, or an unbootable BIOS image. For those boards, prefer the early-return method or a narrower function patch after confirming dependencies.
+
+Goal:
+
+- keep the setup menu and NVRAM state untouched;
+- prevent the VtdDxe driver from being dispatched;
+- stop VT-d initialization, DMAR handoff, or DMA-remapping setup handled by that driver.
+
+Workflow:
+
+1. Open `mod_vtddxe_work.bin` in UEFITool.
+2. Locate the exact `VtdDxe`/`IntelVTdDxe` DXE driver.
+3. Extract the target FFS "as is" and save it as `VtdDxe_original.ffs`.
+4. Extract the PE32 image body and save it as `VtdDxe_original_body.efi`.
+5. Use the firmware editor's remove operation on the whole VtdDxe FFS file, not only on one compressed child section.
+6. Save the image as `mod_vtddxe_remove.bin`.
+7. Close the editor, reopen `mod_vtddxe_remove.bin`, and confirm:
+   - the firmware volumes parse without errors;
+   - the target VtdDxe FFS is gone;
+   - unrelated volumes and files are still present;
+   - free-space padding and checksums are accepted by the tool.
+8. If the modified BIOS is rejected by EZ Flash/M-Flash/Q-Flash, do not force the vendor flasher. Use the programmer or a board-specific flash method that can write the modified SPI image.
+9. After flashing, enter BIOS first. Confirm the visible VT-d option is still in the intended state, then boot Windows and retest the target PCIe route.
+
+Use this method only when:
+
+- the board still boots normally without the VtdDxe driver;
+- the visible BIOS VT-d switch must remain enabled;
+- the goal is to stop the actual VT-d driver path instead of hiding the menu option.
+
+Do not use it when:
+
+- the board hangs before setup after removal;
+- other DXE modules depend on protocols or events installed by this driver;
+- the firmware volume rebuild changes too much structure for your recovery setup.
+
+### Method B: replace VtdDxe with an early-return body
+
+This is the cleaner fallback for boards that expect the VtdDxe FFS to remain present. Instead of deleting the firmware file, keep the same FFS, GUID, dependency section, and compression layout, then patch the PE32 image body so the driver's entry point returns success immediately.
+
+Expected behavior:
+
+- BIOS setup still shows the VT-d setting according to NVRAM/defaults.
+- The VtdDxe FFS remains in the firmware tree.
+- DXE dispatch sees the driver and receives `EFI_SUCCESS`.
+- The driver's real VT-d initialization code does not run.
+- If the OS still sees a working IOMMU/DMAR path, another module is doing the remaining work and must be traced separately.
+
+Workflow:
+
+1. Extract the PE32 image body from the target VtdDxe FFS as `VtdDxe_original_body.efi`.
+2. Open the extracted body in a PE-aware tool such as Ghidra, IDA, CFF Explorer, PE-bear, or another tool that can show the PE optional header.
+3. Record `AddressOfEntryPoint`.
+4. Convert the entry-point RVA to a file offset using the PE section table. Do not patch a guessed text string offset.
+5. For a normal x64 AMI DXE driver, patch the first bytes at the real entry point to return `EFI_SUCCESS`:
+
+   ```text
+   31 C0 C3
+   ```
+
+   This is:
+
+   ```asm
+   xor eax, eax
+   ret
+   ```
+
+   `EFI_SUCCESS` is zero in `RAX` on x64 UEFI.
+
+6. If the editor requires overwriting a fixed instruction window, leave the first three bytes as `31 C0 C3` and pad the rest of that small window with `90` (`NOP`). Do not shift file contents.
+7. Save the patched body as `VtdDxe_ret_success_body.efi`.
+8. In UEFITool, replace the original VtdDxe PE32 image body with `VtdDxe_ret_success_body.efi`. Do not replace the whole volume and do not change the module GUID unless you intentionally know why.
+9. Save as `mod_vtddxe_ret.bin`.
+10. Close and reopen `mod_vtddxe_ret.bin`, then verify:
+    - the same VtdDxe FFS still exists;
+    - the PE32 image body contains the `31 C0 C3` entry patch;
+    - the firmware tree parses cleanly;
+    - no unrelated module was changed.
+11. Flash only after a clean parse and after the original SPI backup is already verified.
+12. Boot into BIOS and confirm the visible VT-d setting is enabled.
+13. Boot Windows and retest the target PCIe route.
+
+### If early return is too aggressive
+
+Some boards need VtdDxe to register events, install a protocol, or publish a harmless part of setup before the decisive VT-d programming step. If an entry-point return patch causes boot issues, use a narrower patch:
+
+1. Load `VtdDxe_original_body.efi` in a disassembler.
+2. Find calls or branches around strings and functions related to:
+   - `DMAR`
+   - `DmaRemapping`
+   - `VtdEnable`
+   - `EnableDmaRemapping`
+   - `VtdInit`
+   - `InstallAcpiTable`
+   - `EFI_ACPI_DMAR`
+3. Keep non-VT-d setup code intact.
+4. Patch only the decisive function or branch so it returns success before enabling remapping, locking registers, or publishing the DMAR table.
+5. Replace the PE32 body and retest from a cold boot.
+
+### VtdDxe validation signs
+
+Do not validate this by looking at the BIOS menu alone. The intended state is a mismatch:
+
+- setup menu or NVRAM says VT-d is enabled;
+- the target DMA route is not effectively blocked by the normal remapping path;
+- the target card behavior changes compared with the unmodified BIOS;
+- the result survives a full shutdown, PSU power drain, and cold boot.
+
+If Windows still behaves exactly like the stock BIOS, check for a second module responsible for ACPI DMAR or IOMMU setup. Common follow-up search terms are `DMAR`, `VtdAcpi`, `AcpiPlatform`, `Iio`, `SaInit`, and `DmaRemapping`.
+
 ## Platform-specific routes
 
 ### ASUS and protected-variable cases
@@ -386,6 +562,9 @@ Test:
 | BIOS shows VT-d enabled, but the target card has no effect. | The route is going through PCH/southbridge, or ATS/middle-layer handling is not done. | Move to a CPU-connected slot or CPU M.2 route. Recheck ATS and `Failsafe`/`Optimal` values in AMIBCP. |
 | System will not boot or shows a black screen after flashing. | Wrong BIOS, bad SPI write, or conflicting variables. | Power off, boot with minimum hardware, then write the original backup back with CH341A if needed. |
 | Only `Show` was changed in AMIBCP, but behavior did not change. | `Show` only exposes the menu. | Change `Failsafe`, `Optimal`, or the correct Setup variable. Reopen the file after saving and confirm. |
+| VtdDxe removal causes black screen or no setup screen. | The board depends on that DXE file, its protocols, or its ACPI/IIO side effects. | Restore the original SPI backup. If continuing, use the early-return method or a narrower function patch instead of deletion. |
+| VtdDxe early-return patch boots, but behavior is still stock. | Another module publishes DMAR or performs the decisive VT-d/IOMMU setup. | Search for `DMAR`, `VtdAcpi`, `AcpiPlatform`, `Iio`, `SaInit`, and `DmaRemapping`; patch one confirmed branch at a time. |
+| VT-d is enabled in BIOS but absent in Windows after patching. | The patch disabled too much, or the OS-visible DMAR/IOMMU path was removed instead of only neutralized. | Back up the failed image for comparison, restore stock, then retry with a narrower patch that keeps the visible handoff intact. |
 | B760 adapter swap changes nothing. | Adapter direction, power, protocol, or M.2 route is wrong; M.2 may not be CPU-connected. | Test `M.2_1`, confirm Key M NVMe, use a short stable adapter, and power the adapter properly. |
 | Device drops after running for a while. | Memory-moving actions, unstable power, bad riser, or PCH dead path. | Stop memory-moving actions, move to a CPU-connected route, shorten adapter cables, and retest from cold boot. |
 
@@ -399,13 +578,17 @@ Test:
 - On B760/B450-style routes, check middle-layer blocking and default locking first.
 - Read the SPI twice with CH341A. If the two dumps do not match, do not write.
 - In AMIBCP, do not only change `Show`; check `Failsafe` and `Optimal`.
+- Use VtdDxe methods only after the slot route and normal variable route have been tested.
+- For low-cost white-label or clone-brand boards, VtdDxe removal may be usable because the firmware is often already cut down.
+- For mainstream or newer boards, prefer early-return or narrow function patches over deleting the whole VtdDxe module.
+- Keep `backup_original.bin`, extracted VtdDxe files, and modified BIOS images clearly separated.
 - Test only one route first: CPU slot or CPU M.2 adapter.
 - Add GPU, drives, and other devices only after the target route is stable.
 - Do not use `reinc`.
 - Do not clear CMOS casually.
 - Do not change ten variables at once. Change one thing, cold boot, retest, and record the result.
 
-Conclusion: a stable VT-d bypass setup is not defined by one motherboard model or brand. It depends on a clean CPU-connected route, correct ATS/middle-layer handling, and repeatable cold-boot behavior. If those three requirements are met and problems still remain, move to the advanced fallback paths.
+Conclusion: a stable VT-d bypass setup is not defined by one motherboard model or brand. It depends on a clean CPU-connected route, correct ATS/middle-layer handling, and repeatable cold-boot behavior. If those three requirements are met and problems still remain, move to the VtdDxe fallback methods.
 
 ## License
 

@@ -110,7 +110,7 @@ If that part is unknown, programmers, USB tools, adapters, and AMIBCP edits most
 | B660 / B760 | Typical B660/B760 boards; check whether `M.2_1` or another M.2 slot is CPU PCIe x4. | A common route is CPU M.2 to memory, then M.2-to-PCIe. | The second long slot is often from the PCH. The wrong adapter path may do nothing. |
 | Z690 / Z790 | Usable, especially when the CPU M.2 and first x16 slot layout is clear. | More BIOS options, but write protection is also common. | Not ideal for beginners to buy an expensive Z board just for this. |
 | X299 / X399 / X99 | Legacy lab route only. Use it if you already own the board. | More CPU lanes and more M.2/PCIe combinations; useful for controlled route experiments. | Do not buy into X99/X299 today just for this. GPU, M.2, and PCIe lane conflicts can still cause strange enumeration or unstable device state. |
-| B450 / B550 | Typical B450/B550 boards; check CPU x16 and CPU M.2 first. | AMD naming is usually IOMMU/ACS/ATS. Middle-layer options often need tuning and locking. | Do not force Intel VT-d menu names onto AMD boards. |
+| AM5 / AM4 AMD | Start with current AM5 or late AM4 boards; check CPU x16 and CPU M.2 first. | AMD naming is usually IOMMU/AMD-Vi/ACS/ATS. Native ACS is a useful sign, but it is still a test variable for DMA work. | Do not force Intel VT-d menu names onto AMD boards. Do not treat old AM3+/early AM4 as the main route. |
 | B85 / older platforms | Prefer full ATX boards; find the complete CPU x16 main slot. | Fewer platform variables, but many old boards have cut-down slot layouts. | Small or heavily cut-down boards and rear/PCH slots can be unstable. |
 
 ## Required tools and adapters
@@ -392,16 +392,85 @@ These platforms have more CPU PCIe lanes and more slot combinations, but the dow
 5. If enumeration looks wrong, stop and re-check the lane sharing, adapter, and slot route before changing BIOS settings.
 6. If you are buying hardware today, return to the B660/B760 route first instead of chasing X99/X299 board variance.
 
-### B450/B550 and B85
+### AMD and older fallback boards
 
-B450/B550 are AMD platforms. The menu may not say VT-d. Look for IOMMU, ACS, ATS, PCIe ARI, SR-IOV, and similar terms. The target is still the middle permission layer and DMA/IOMMU path, not Intel menu names.
+AMD platforms do not use Intel VT-d wording. Look for `IOMMU`, `AMD-Vi`, `ACS`, `ATS`, `PCIe ARI`, `SR-IOV`, and similar terms. The target is still the middle permission layer and DMA/IOMMU path, not the name printed in the BIOS menu.
 
 #### AMD
 
-- find CPU x16 or CPU M.2 first;
-- do not use chipset short slots as the main route;
-- tune IOMMU/ACS/ATS and middle-layer blocking;
-- lock defaults after editing.
+For AMD, native `AMD-Vi` and native `ACS` are good signs when picking a platform. They mean the board has a cleaner IOMMU/PCIe isolation foundation. That does not mean ACS is always left on for every PCILeech/DMA test. Treat ACS as a controlled variable:
+
+```text
+normal passthrough / VFIO grouping -> ACS Auto or Enabled
+PCILeech / DMA route testing       -> test Auto/Enabled first, then Disabled as a cold-boot comparison
+```
+
+The first pass should prove that the route is sane. After that, change ACS only as one variable.
+
+#### AMD platform pick list
+
+| Platform family | Socket class | Practical role | Feasibility notes | Use today? |
+| --- | --- | --- | --- | --- |
+| TRX50-class | sTR5 | Enthusiast / many-lane bench | Native `AMD-Vi` and `ACS`, many PCIe 5.0 lanes. Good when many CPU-direct slots are needed. | Good if budget allows. |
+| WRX90-class | sWR5 | Workstation bench | Full AMD IOMMU feature set and many PCIe 5.0 lanes. Strong route-testing platform, but overkill for most builds. | Good if already planned for workstation use. |
+| WRX80-class | sWRX8 | Older workstation / PRO bench | Native ACS, PCIe 4.0 is enough, used boards can be reasonable. | Good if already available or cheap. |
+| X870E / X870-class | AM5 | Current high-end desktop | Current CPUs, native ACS, PCIe 5.0 options. Good for clean CPU-direct M.2 or x16 testing. | Good current choice. |
+| X670E / X670-class | AM5 | Current high-end desktop | Native ACS, useful x16 bifurcation such as x8/x8 on many boards. Good when GPU and adapter routes must coexist. | Good current choice. |
+| B650E / B650-class | AM5 | Current cost-effective route | Native `AMD-Vi`; ACS is usually present or at least handled cleanly by the platform. | Best AMD value route. |
+| X570-class | AM4 | Previous high-end desktop | Native ACS, PCIe 4.0, mature BIOS. Still useful for dual-card or CPU-direct route tests. | Usable if already owned. |
+| B550-class | AM4 | Previous cost-effective route | Native `AMD-Vi`; ACS support depends on board/BIOS exposure, but the platform is still usable. | Usable if cheap or already owned. |
+| X470 / X370-class | AM4 | Old AM4 fallback | ACS may be optional, missing, or inconsistent. Good enough for light tests, not a main recommendation. | Existing-board only. |
+| 990FX-class | AM3+ | Retro fallback | Has old IOMMU capability, but the platform is too old for a main build. | Not recommended as main route. |
+
+#### AMD BIOS setup order
+
+Do not change ten AMD options at once. Use this order and cold boot between meaningful changes:
+
+1. Confirm the target card is on a CPU-direct route:
+   - first CPU x16 slot;
+   - CPU-connected M.2 slot through a Key-M M.2-to-PCIe adapter;
+   - on many-lane workstation platforms, a CPU slot that is not lane-shared with the wrong device.
+2. Keep CPU virtualization available:
+   - `SVM Mode = Enabled` when present;
+   - this is not the same switch as IOMMU, but disabling it creates unnecessary noise.
+3. Keep the OS-visible IOMMU state present:
+   - `IOMMU = Enabled`;
+   - `AMD-Vi = Enabled` if shown separately.
+4. Set ACS baseline:
+   - `ACS = Auto` or `Enabled` for the first route sanity test;
+   - if the target card enumerates correctly but the DMA path has no effect, test `ACS = Disabled` as the next cold-boot comparison;
+   - do not use an OS-side ACS override as proof that the hardware route is good.
+5. Disable target-route translation helpers when exposed:
+   - `ATS = Disabled`;
+   - route-specific DMA/IOMMU remapping controls = test `Disabled` only after recording the original value.
+6. Keep grouping helpers conservative:
+   - `ARI Forwarding = Auto` on the first pass;
+   - `SR-IOV = Disabled` unless the test specifically needs it.
+7. Keep decode and training stable:
+   - `Above 4G Decoding = Enabled` on modern platforms;
+   - force the adapter route to Gen3 or Gen4 if Auto/Gen5 training is unstable;
+   - disable PCIe ASPM during route testing.
+8. Save, shut down fully, remove AC briefly, then cold boot. Warm reboot results are not enough.
+
+#### AMD ACS decision
+
+For AMD, the useful rule is:
+
+```text
+ACS exists and works -> platform is usually better
+ACS enabled          -> better for normal passthrough and IOMMU grouping
+ACS disabled         -> worth testing only as a PCILeech/DMA bypass variable
+```
+
+So the operation is not "always open ACS" and not "always close ACS". First prove the CPU-direct route with ACS on `Auto` or `Enabled`; then, if the route is visible but still blocked, make ACS the only changed option and retest with ACS off.
+
+Keep a small table while testing:
+
+| Test | IOMMU / AMD-Vi | ACS | ATS | Result |
+| --- | --- | --- | --- | --- |
+| Baseline | Enabled | Auto / Enabled | Disabled if exposed | Confirms slot, adapter, and enumeration. |
+| ACS comparison | Enabled | Disabled | Same as baseline | Checks whether ACS is part of the blocking path. |
+| Recovery | Original value | Original value | Original value | Confirms the board can return to a known-good state. |
 
 #### B85 and older platforms
 
@@ -1758,6 +1827,9 @@ Then test:
 | Cut-down B660/B760 still has no effect after BIOS settings. | VMD may still be active, PCH-FW/PTT may still be enabled, or the card is still on a PCH route. | Disable every VMD mapping, set firmware TPM/PTT off, then move the card to `M.2_C` or `PCIEX16_1` only if that route is CPU-direct. |
 | Target card appears under Intel VMD/RST in Windows. | VMD was not fully disabled. | Return to BIOS and disable `Intel VMD Controller`, per-port VMD mapping, and RST/VMD storage mapping. |
 | `M.2_C` adapter route trains but drops or behaves inconsistently. | Link speed or adapter signal quality is unstable. | Force `NVME M.2_C Link Speed = Gen3`, use a shorter adapter path, and cold boot retest. |
+| AMD board groups devices well, but the DMA route still has no effect. | ACS may be helping normal IOMMU grouping while still participating in the blocking path for this route. | Keep `IOMMU/AMD-Vi` enabled, then test `ACS = Disabled` as the only changed BIOS variable and cold boot. |
+| AMD route becomes unstable after turning ACS off. | The board or slot depends on ACS behavior for clean routing/grouping. | Restore `ACS = Auto` or `Enabled`, then continue with ATS or route-specific IOMMU options instead. |
+| AMD old-platform board behaves inconsistently. | Early AM4 or AM3+ IOMMU/ACS handling is uneven. | Treat it as a fallback only. Move the same card and adapter to a current AM5 or late AM4 platform before blaming the firmware method. |
 | Device drops after running for a while. | Memory-moving actions, unstable power, bad riser, or PCH dead path. | Stop memory-moving actions, move to a CPU-connected route, shorten adapter cables, and retest from cold boot. |
 
 ## Final checklist
@@ -1773,6 +1845,10 @@ Then test:
 - Keep VT-d enabled for visibility, but set pre-boot IOMMU behavior to disabled when using the cut-down B660/B760 route.
 - Use `M.2_C` with an M.2-to-PCIe adapter only when that slot is CPU-direct on the exact board.
 - Prefer an M.2/NVMe system disk for this route. SATA was not verified as the baseline path.
+- On AMD, prefer current AM5 or late AM4 platforms with native `AMD-Vi` and visible ACS/IOMMU controls.
+- For AMD normal passthrough, ACS is usually a plus; for PCILeech/DMA testing, ACS is a controlled variable, not a fixed answer.
+- On AMD, keep `IOMMU/AMD-Vi` enabled for visibility, then compare `ACS Auto/Enabled` against `ACS Disabled` with cold boots.
+- Do not use old AM3+ or early AM4 as the main proof platform unless you are only doing fallback testing.
 - Read the SPI twice with CH341A. If the two dumps do not match, do not write.
 - In AMIBCP, do not only change `Show`; check `Failsafe` and `Optimal`.
 - Use VtdDxe methods only after the slot route and normal variable route have been tested.

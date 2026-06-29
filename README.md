@@ -62,24 +62,25 @@ PCH/chipset-side paths can still enumerate, but they are more likely to produce 
 
 The common mistake is staring at the VT-d menu item and ignoring the path. The useful work is PCIe routing, ATS, DMA remapping, interrupt remapping, and the permission layer between the endpoint and memory.
 
-For many B760/H610 setups, the useful low-cost route is often:
+For many low-end Intel 600/700-series setups, the useful route is often:
 
 ```text
 CPU-connected M.2 slot -> M.2-to-PCIe adapter -> target card
 ```
 
-On AMD, do not expect Intel-style `VT-d` naming. You are usually dealing with `IOMMU`, `ACS`, `ATS`, PCIe ARI, SR-IOV, and similar options.
+On AMD, do not expect Intel-style `VT-d` naming. You are usually dealing with `IOMMU`, `AMD-Vi`, `ACS`, `ATS`, PCIe ARI, SR-IOV, and similar options.
 
 ## Recommended route order in 2026
 
-Start with routes that fit cheap current boards and can be repeated without guessing. Old HEDT boards still have value on a bench, but they are no longer the first thing I would buy for this job.
+For Intel, start with cheap current boards that can be repeated without guessing. For AMD, go the other way and prefer higher-end boards with better CPU lane layout and native ACS/IOMMU exposure. Old HEDT boards still have value on a bench, but they are no longer the first thing I would buy for this job.
 
 | Priority | Route | Use it when | Skip it when |
 | --- | --- | --- | --- |
-| 1 | Cut-down B660/B760 BIOS route | You have a low-cost B660/B760 board with CPU-direct M.2/PCIe, visible VMD/PCH-FW/PTT controls, and an older official BIOS available. | The target slot is PCH-side, VMD cannot be disabled, or the board manual does not identify CPU-direct lanes. |
-| 2 | Normal AMIBCP/IFR variable route | The board exposes ATS, DMA Remapping, VT-d, IOMMU, or pre-boot IOMMU variables cleanly. | Only `Show` changes are possible and defaults cannot be locked or verified. |
-| 3 | VtdDxe fallback | Variable edits do not work, but BIOS recovery is ready and the board's firmware structure is understood. | You cannot recover a bad flash or cannot identify the exact VtdDxe module. |
-| 4 | DMA firmware-side DMAR rewrite | The DMA device firmware can run an autonomous early-boot task and the PCIe route already works. | The card only works after Windows boots, the endpoint is already IOMMU-blocked, or there is no safe early DMA write window. |
+| 1 | Cut-down Intel 600/700-series BIOS route | You have a low-cost B660/B760/Z690/Z790 board with CPU-direct M.2/PCIe, visible VMD/PCH-FW/PTT controls, and an older official BIOS available. | The target slot is PCH-side, VMD cannot be disabled, or the board manual does not identify CPU-direct lanes. |
+| 2 | High-end AMD CPU-direct route | You have a higher-end AMD board with native `AMD-Vi`, visible ACS/IOMMU controls, and a documented CPU-direct x16 or CPU-connected M.2 route. | The target slot is chipset-side, the board hides ACS/IOMMU controls, or you are trying to prove the route through a cheap cut-down AMD board. |
+| 3 | Normal AMIBCP/IFR variable route | The board exposes ATS, DMA Remapping, VT-d, IOMMU, or pre-boot IOMMU variables cleanly. | Only `Show` changes are possible and defaults cannot be locked or verified. |
+| 4 | VtdDxe fallback | Variable edits do not work, but BIOS recovery is ready and the board's firmware structure is understood. | You cannot recover a bad flash or cannot identify the exact VtdDxe module. |
+| 5 | DMA firmware-side DMAR rewrite | The DMA device firmware can run an autonomous early-boot task and the PCIe route already works. | The card only works after Windows boots, the endpoint is already IOMMU-blocked, or there is no safe early DMA write window. |
 | Legacy | X299/X399/X99 route | You already own the board and use it as a lane-rich lab platform. | You are buying hardware today only for this method. It is no longer the preferred route. |
 
 ## Understand the PCIe path first
@@ -106,16 +107,16 @@ If that part is unknown, programmers, USB tools, adapters, and AMIBCP edits most
 
 | Platform | Usable direction | What matters | Trap to avoid |
 | --- | --- | --- | --- |
-| H610 / H-series | Basic H610/H610M boards; prefer CPU-connected M.2 or the first long PCIe slot. | Low cost, fewer variables, good for one-card, one-route testing. | Small boards have limited resources and many PCH slots. Budget does not mean every slot works. |
-| B660 / B760 | Typical B660/B760 boards; check whether `M.2_1` or another M.2 slot is CPU PCIe x4. | A common route is CPU M.2 to memory, then M.2-to-PCIe. | The second long slot is often from the PCH. The wrong adapter path may do nothing. |
-| Z690 / Z790 | Usable, especially when the CPU M.2 and first x16 slot layout is clear. | More BIOS options, but write protection is also common. | Not ideal for beginners to buy an expensive Z board just for this. |
+| H610 / H-series | Basic H610/H610M boards; prefer CPU-connected M.2 or the first long PCIe slot. | Intel is the cheaper-the-better direction here: fewer features, fewer locks, fewer lane-sharing surprises. | Small boards have limited resources and many PCH slots. Budget does not mean every slot works. |
+| B660 / B760 | Typical low-cost boards; check whether `M.2_1` or another M.2 slot is CPU PCIe x4. | A common route is CPU M.2 to memory, then M.2-to-PCIe. | The second long slot is often from the PCH. The wrong adapter path may do nothing. |
+| Z690 / Z790 | Only treat as useful when using a low-end/cut-down board with clear CPU-direct M.2 or first x16 routing. | Same 600/700-series logic as B660/B760: CPU-direct route, old usable BIOS, VMD/PTT controls, and visible VT-d/IOMMU options. | Do not buy an expensive high-end Z board just for this. More features often mean more locks, more lane sharing, and more variables. |
 | X299 / X399 / X99 | Legacy lab route only. Use it if you already own the board. | More CPU lanes and more M.2/PCIe combinations; useful for controlled route experiments. | Do not buy into X99/X299 today just for this. GPU, M.2, and PCIe lane conflicts can still cause strange enumeration or unstable device state. |
-| AM5 / AM4 AMD | Start with current AM5 or late AM4 boards; check CPU x16 and CPU M.2 first. | AMD naming is usually IOMMU/AMD-Vi/ACS/ATS. Native ACS is a useful sign, but it is still a test variable for DMA work. | Do not force Intel VT-d menu names onto AMD boards. Do not treat old AM3+/early AM4 as the main route. |
+| AM5 / AM4 AMD | Prefer higher-end boards first; check CPU x16 and CPU-connected M.2 before anything else. | AMD is the opposite of the Intel budget-board route: better boards usually provide cleaner native `AMD-Vi`, ACS, lane wiring, and BIOS exposure. | Do not force Intel VT-d menu names onto AMD boards. Do not treat old AM3+/early AM4 or low-end AMD boards as the main proof route. |
 | B85 / older platforms | Prefer full ATX boards; find the complete CPU x16 main slot. | Fewer platform variables, but many old boards have cut-down slot layouts. | Small or heavily cut-down boards and rear/PCH slots can be unstable. |
 
 ## Required tools and adapters
 
-The programmer is for backup and recovery. It will not make a bad PCIe route good. In many B660/B760/H610 setups, the M.2-to-PCIe adapter or PCIe riser determines whether the target route is usable.
+The programmer is for backup and recovery. It will not make a bad PCIe route good. In many B660/B760/Z690/Z790/H610 setups, the M.2-to-PCIe adapter or PCIe riser determines whether the target route is usable.
 
 | Prepare | Search terms | Check before buying |
 | --- | --- | --- |
@@ -261,7 +262,7 @@ Neither route is universal. It must match the exact board and BIOS version.
 5. Run only the variable script made for this exact board and BIOS. If you do not have the correct `VarOffset`, do not guess.
 6. After saving and rebooting, do not clear CMOS unless you understand the consequence. Clearing CMOS may reset the variables you just changed.
 
-### B760/H610 route: prioritize CPU-connected M.2
+### Intel 600/700 route: prioritize CPU-connected M.2
 
 This is the platform family people misread the most.
 
@@ -279,11 +280,11 @@ The first long slot may be CPU-connected, but the target card shape, adapter, GP
 8. If using a PCIe x1 riser, test the first required slot/path before judging the BIOS result.
 9. In the OS, check whether the target route is stable, whether the device drops, and whether the state survives a cold boot.
 
-B760/H610 is useful because some boards provide a cheap, clean, repeatable CPU-connected M.2 route. PCH slots producing no useful result is a common outcome.
+Intel 600/700-series boards are useful because some low-end boards provide a cheap, clean, repeatable CPU-connected M.2 route. PCH slots producing no useful result is a common outcome.
 
-#### Cut-down B660/B760 BIOS route
+#### Cut-down Intel 600/700-series BIOS route
 
-I use this route for cheap B660/B760 boards with cut-down firmware, especially boards where the vendor clearly simplified the normal stack. Do not treat it as a universal B660/B760 recipe.
+I use this route for cheap B660/B760/Z690/Z790 boards with cut-down firmware, especially boards where the vendor clearly simplified the normal stack. Do not treat it as a universal Intel 600/700-series recipe.
 
 The short version:
 
@@ -378,7 +379,7 @@ Menu names vary by vendor. On this cut-down UEFI layout, these are the settings 
 
 Treat this as an old lab route. If the board is already on the bench, it is still useful. If you are buying hardware today, do not start with X99/X299.
 
-These platforms have more CPU PCIe lanes and more slot combinations, but the downside is also more sharing and conflicts. GPU, M.2, U.2, and PCIe slots can fight for lanes and cause strange enumeration. Old BIOS builds, aging boards, and mixed adapter quality can waste more time than a current B660/B760 CPU-direct M.2 route.
+These platforms have more CPU PCIe lanes and more slot combinations, but the downside is also more sharing and conflicts. GPU, M.2, U.2, and PCIe slots can fight for lanes and cause strange enumeration. Old BIOS builds, aging boards, and mixed adapter quality can waste more time than a current Intel 600/700-series CPU-direct M.2 route.
 
 #### Test flow
 
@@ -390,7 +391,7 @@ These platforms have more CPU PCIe lanes and more slot combinations, but the dow
    - adapter second;
    - BIOS setting third.
 5. If enumeration looks wrong, stop and re-check the lane sharing, adapter, and slot route before changing BIOS settings.
-6. If you are buying hardware today, return to the B660/B760 route first instead of chasing X99/X299 board variance.
+6. If you are buying hardware today, return to the Intel 600/700-series route first instead of chasing X99/X299 board variance.
 
 ### AMD and older fallback boards
 
@@ -407,6 +408,10 @@ PCILeech / DMA route testing       -> test Auto/Enabled first, then Disabled as 
 
 The first pass should prove that the route is sane. After that, change ACS only as one variable.
 
+AMD hardware selection is the reverse of the cheap Intel route. Do not chase the lowest-end AMD board for this job. A higher-end board is usually better because it gives more CPU lanes, cleaner slot wiring, native `AMD-Vi`, better ACS exposure, and fewer hidden chipset-side traps.
+
+Hard rule for AMD: the target card must sit on a CPU-direct PCIe path. A chipset-side slot can enumerate and still be useless for this route. Use the first CPU x16 slot, a documented CPU-connected M.2 slot with a Key-M M.2-to-PCIe adapter, or a many-lane CPU slot whose lane sharing has already been checked in the manual. Do not use a short chipset slot, a secondary chipset-fed long slot, or an unknown M.2 slot as proof.
+
 #### AMD platform pick list
 
 | Platform family | Socket class | Practical role | Feasibility notes | Use today? |
@@ -416,9 +421,9 @@ The first pass should prove that the route is sane. After that, change ACS only 
 | WRX80-class | sWRX8 | Older workstation / PRO bench | Native ACS, PCIe 4.0 is enough, used boards can be reasonable. | Good if already available or cheap. |
 | X870E / X870-class | AM5 | Current high-end desktop | Current CPUs, native ACS, PCIe 5.0 options. Good for clean CPU-direct M.2 or x16 testing. | Good current choice. |
 | X670E / X670-class | AM5 | Current high-end desktop | Native ACS, useful x16 bifurcation such as x8/x8 on many boards. Good when GPU and adapter routes must coexist. | Good current choice. |
-| B650E / B650-class | AM5 | Current cost-effective route | Native `AMD-Vi`; ACS is usually present or at least handled cleanly by the platform. | Best AMD value route. |
+| B650E / B650-class | AM5 | Current cost-effective route | Native `AMD-Vi`; ACS is usually present or at least handled cleanly by the platform, but slot wiring must be checked carefully. | Usable value route, not the first pick if budget allows higher-end AM5. |
 | X570-class | AM4 | Previous high-end desktop | Native ACS, PCIe 4.0, mature BIOS. Still useful for dual-card or CPU-direct route tests. | Usable if already owned. |
-| B550-class | AM4 | Previous cost-effective route | Native `AMD-Vi`; ACS support depends on board/BIOS exposure, but the platform is still usable. | Usable if cheap or already owned. |
+| B550-class | AM4 | Previous cost-effective route | Native `AMD-Vi`; ACS support depends on board/BIOS exposure, and CPU-direct M.2/x16 routing must be verified. | Existing-board or cheap fallback only. |
 | X470 / X370-class | AM4 | Old AM4 fallback | ACS may be optional, missing, or inconsistent. Good enough for light tests, not a main recommendation. | Existing-board only. |
 | 990FX-class | AM3+ | Retro fallback | Has old IOMMU capability, but the platform is too old for a main build. | Not recommended as main route. |
 
@@ -426,10 +431,11 @@ The first pass should prove that the route is sane. After that, change ACS only 
 
 Do not change ten AMD options at once. Use this order and cold boot between meaningful changes:
 
-1. Confirm the target card is on a CPU-direct route:
+1. Confirm the target card is on a CPU-direct route. This is mandatory, not a preference:
    - first CPU x16 slot;
    - CPU-connected M.2 slot through a Key-M M.2-to-PCIe adapter;
    - on many-lane workstation platforms, a CPU slot that is not lane-shared with the wrong device.
+   If the path is chipset-side, stop here and move the card before changing BIOS options.
 2. Keep CPU virtualization available:
    - `SVM Mode = Enabled` when present;
    - this is not the same switch as IOMMU, but disabling it creates unnecessary noise.
@@ -1823,10 +1829,11 @@ Then test:
 | DMA firmware DMAR rewrite changes nothing. | The patch ran after the OS already parsed DMAR, or the card was already blocked before the write. | Move the rewrite earlier in the device firmware boot flow, verify read/write access before OS handoff, and compare a cold boot with the rewrite disabled. |
 | DMAR rewrite causes boot hang. | Bad checksum, broken structure length, or a broad patch such as hiding the whole table. | Revert to read-only logging, validate RSDP/XSDT/DMAR checksums, then patch only the target DRHD scope or matching `INCLUDE_PCI_ALL` bit. |
 | DMAR rewrite makes VT-d disappear completely. | The whole DMAR table was hidden or corrupted instead of narrowed. | Restore the original table behavior and use a targeted device-scope or DRHD flag patch. |
-| B760 adapter swap changes nothing. | Adapter direction, power, protocol, or M.2 route is wrong; M.2 may not be CPU-connected. | Test `M.2_1`, confirm Key M NVMe, use a short stable adapter, and power the adapter properly. |
-| Cut-down B660/B760 still has no effect after BIOS settings. | VMD may still be active, PCH-FW/PTT may still be enabled, or the card is still on a PCH route. | Disable every VMD mapping, set firmware TPM/PTT off, then move the card to `M.2_C` or `PCIEX16_1` only if that route is CPU-direct. |
+| Intel 600/700 adapter swap changes nothing. | Adapter direction, power, protocol, or M.2 route is wrong; M.2 may not be CPU-connected. | Test `M.2_1`, confirm Key M NVMe, use a short stable adapter, and power the adapter properly. |
+| Cut-down Intel 600/700 board still has no effect after BIOS settings. | VMD may still be active, PCH-FW/PTT may still be enabled, or the card is still on a PCH route. | Disable every VMD mapping, set firmware TPM/PTT off, then move the card to `M.2_C` or `PCIEX16_1` only if that route is CPU-direct. |
 | Target card appears under Intel VMD/RST in Windows. | VMD was not fully disabled. | Return to BIOS and disable `Intel VMD Controller`, per-port VMD mapping, and RST/VMD storage mapping. |
 | `M.2_C` adapter route trains but drops or behaves inconsistently. | Link speed or adapter signal quality is unstable. | Force `NVME M.2_C Link Speed = Gen3`, use a shorter adapter path, and cold boot retest. |
+| AMD route enumerates but has no effect. | The target card may be on a chipset-side slot or a non-CPU M.2 route. | Move it to the first CPU x16 slot, a documented CPU-connected M.2 adapter route, or a verified CPU lane slot on a higher-end board. |
 | AMD board groups devices well, but the DMA route still has no effect. | ACS may be helping normal IOMMU grouping while still participating in the blocking path for this route. | Keep `IOMMU/AMD-Vi` enabled, then test `ACS = Disabled` as the only changed BIOS variable and cold boot. |
 | AMD route becomes unstable after turning ACS off. | The board or slot depends on ACS behavior for clean routing/grouping. | Restore `ACS = Auto` or `Enabled`, then continue with ATS or route-specific IOMMU options instead. |
 | AMD old-platform board behaves inconsistently. | Early AM4 or AM3+ IOMMU/ACS handling is uneven. | Treat it as a fallback only. Move the same card and adapter to a current AM5 or late AM4 platform before blaming the firmware method. |
@@ -1836,16 +1843,17 @@ Then test:
 
 - Before buying a board, read the manual and check whether the first long slot is CPU-connected.
 - Check whether `M.2_1` is CPU PCIe x4.
-- For low cost, start with H610/B760 CPU M.2 routes.
-- On cut-down B660/B760 boards, test the oldest official BIOS before assuming the route is impossible.
-- For the cut-down B660/B760 route, disable PCH-FW/PTT and VMD before testing the adapter.
+- Intel is the low-end-board route: start with H610/B660/B760 and only use Z690/Z790 when it is a low-end/cut-down board with a clear CPU-direct route.
+- On cut-down B660/B760/Z690/Z790 boards, test the oldest official BIOS before assuming the route is impossible.
+- For the cut-down Intel 600/700 route, disable PCH-FW/PTT and VMD before testing the adapter.
 - Use X99/X299 only as an existing lab platform; do not make it the current first-choice route.
 - On protected-variable boards, check PCIe ATS first.
 - On B760/B450-style routes, check middle-layer blocking and default locking first.
-- Keep VT-d enabled for visibility, but set pre-boot IOMMU behavior to disabled when using the cut-down B660/B760 route.
+- Keep VT-d enabled for visibility, but set pre-boot IOMMU behavior to disabled when using the cut-down Intel 600/700 route.
 - Use `M.2_C` with an M.2-to-PCIe adapter only when that slot is CPU-direct on the exact board.
 - Prefer an M.2/NVMe system disk for this route. SATA was not verified as the baseline path.
-- On AMD, prefer current AM5 or late AM4 platforms with native `AMD-Vi` and visible ACS/IOMMU controls.
+- AMD is the high-end-board route: prefer higher-end AM5, many-lane, or workstation-class platforms with native `AMD-Vi` and visible ACS/IOMMU controls.
+- On AMD, the target card must be on a CPU-direct PCIe slot or a documented CPU-connected M.2 adapter route. Chipset-side slots are not a valid proof route.
 - For AMD normal passthrough, ACS is usually a plus; for PCILeech/DMA testing, ACS is a controlled variable, not a fixed answer.
 - On AMD, keep `IOMMU/AMD-Vi` enabled for visibility, then compare `ACS Auto/Enabled` against `ACS Disabled` with cold boots.
 - Do not use old AM3+ or early AM4 as the main proof platform unless you are only doing fallback testing.

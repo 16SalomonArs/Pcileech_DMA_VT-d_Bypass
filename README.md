@@ -72,7 +72,7 @@ On AMD, do not expect Intel-style `VT-d` naming. You are usually dealing with `I
 
 ## Recommended route order in 2026
 
-For Intel, start with cheap current boards that can be repeated without guessing. For AMD, go the other way and prefer higher-end boards with better CPU lane layout and native ACS/IOMMU exposure. Old HEDT boards still have value on a bench, but they are no longer the first thing I would buy for this job.
+For Intel, start with cheap current boards that can be repeated without guessing. For AMD, go the other way and prefer higher-end boards with better CPU lane layout and native ACS/IOMMU exposure. Old HEDT and old consumer boards can still have value on a bench, but they are no longer the first thing I would buy for this job.
 
 | Priority | Route | Use it when | Skip it when |
 | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ For Intel, start with cheap current boards that can be repeated without guessing
 | 3 | Normal AMIBCP/IFR variable route | The board exposes ATS, DMA Remapping, VT-d, IOMMU, or pre-boot IOMMU variables cleanly. | Only `Show` changes are possible and defaults cannot be locked or verified. |
 | 4 | VtdDxe fallback | Variable edits do not work, but BIOS recovery is ready and the board's firmware structure is understood. | You cannot recover a bad flash or cannot identify the exact VtdDxe module. |
 | 5 | DMA firmware-side DMAR rewrite | The DMA device firmware can run an autonomous early-boot task and the PCIe route already works. | The card only works after Windows boots, the endpoint is already IOMMU-blocked, or there is no safe early DMA write window. |
-| Legacy | X299/X399/X99 route | You already own the board and use it as a lane-rich lab platform. | You are buying hardware today only for this method. It is no longer the preferred route. |
+| Legacy | X99/X299/X399/B85/Z97 route | You already own the board and can identify the real CPU-connected slot path. | You are buying hardware today only for this method. It is no longer the preferred route. |
 
 ## Understand the PCIe path first
 
@@ -110,9 +110,9 @@ If that part is unknown, programmers, USB tools, adapters, and AMIBCP edits most
 | H610 / H-series | Basic H610/H610M boards; prefer CPU-connected M.2 or the first long PCIe slot. | Intel is the cheaper-the-better direction here: fewer features, fewer locks, fewer lane-sharing surprises. | Small boards have limited resources and many PCH slots. Budget does not mean every slot works. |
 | B660 / B760 | Typical low-cost boards; check whether `M.2_1` or another M.2 slot is CPU PCIe x4. | A common route is CPU M.2 to memory, then M.2-to-PCIe. | The second long slot is often from the PCH. The wrong adapter path may do nothing. |
 | Z690 / Z790 | Only treat as useful when using a low-end/cut-down board with clear CPU-direct M.2 or first x16 routing. | Same 600/700-series logic as B660/B760: CPU-direct route, old usable BIOS, VMD/PTT controls, and visible VT-d/IOMMU options. | Do not buy an expensive high-end Z board just for this. More features often mean more locks, more lane sharing, and more variables. |
-| X299 / X399 / X99 | Legacy lab route only. Use it if you already own the board. | More CPU lanes and more M.2/PCIe combinations; useful for controlled route experiments. | Do not buy into X99/X299 today just for this. GPU, M.2, and PCIe lane conflicts can still cause strange enumeration or unstable device state. |
+| X99 / X299 / X399 | Legacy HEDT/workstation lab route only. Use it if you already own the board. | More CPU lanes and more PCIe combinations; useful for controlled route experiments. | Do not buy into old HEDT today just for this. GPU, M.2, and PCIe lane conflicts can still cause strange enumeration or unstable device state. |
 | AM5 / AM4 AMD | Prefer higher-end boards first; check CPU x16 and CPU-connected M.2 before anything else. | AMD is the opposite of the Intel budget-board route: better boards usually provide cleaner native `AMD-Vi`, ACS, lane wiring, and BIOS exposure. | Do not force Intel VT-d menu names onto AMD boards. Do not treat old AM3+/early AM4 or low-end AMD boards as the main proof route. |
-| B85 / older platforms | Prefer full ATX boards; find the complete CPU x16 main slot. | Fewer platform variables, but many old boards have cut-down slot layouts. | Small or heavily cut-down boards and rear/PCH slots can be unstable. |
+| B85 / Z97 / older platforms | Prefer full ATX boards; find the complete CPU x16 main slot. | Same old-platform bucket as X99/X299/X399, but not lane-rich. Treat it as a simple CPU x16 validation route. | Small or heavily cut-down boards, rear slots, and chipset-side slots can be unstable or useless. |
 
 ## Required tools and adapters
 
@@ -375,11 +375,16 @@ Menu names vary by vendor. On this cut-down UEFI layout, these are the settings 
 - If SATA is involved and the result changes, remove SATA from the first-pass test. Use M.2/NVMe as the baseline because SATA was not verified for this route.
 - If the link drops or the adapter is inconsistent, force the target route to Gen3 before changing firmware modules.
 
-### Legacy X299/X399/X99 route
+### Legacy X99/X299/X399/B85/Z97 route
 
-Treat this as an old lab route. If the board is already on the bench, it is still useful. If you are buying hardware today, do not start with X99/X299.
+Treat this as an old lab route. If the board is already on the bench, it is still useful. If you are buying hardware today, do not start with X99, X299, X399, B85, or Z97.
 
-These platforms have more CPU PCIe lanes and more slot combinations, but the downside is also more sharing and conflicts. GPU, M.2, U.2, and PCIe slots can fight for lanes and cause strange enumeration. Old BIOS builds, aging boards, and mixed adapter quality can waste more time than a current Intel 600/700-series CPU-direct M.2 route.
+Keep two cases separate:
+
+- X99, X299, and X399 are old HEDT/workstation-style routes. They usually provide more CPU PCIe lanes and more slot combinations, but also more lane sharing, old BIOS behavior, and adapter conflicts.
+- B85 and Z97 are old consumer routes. They are not lane-rich. Use them only as a simple CPU x16 main-slot test bed, preferably on full ATX boards with an uncomplicated slot layout.
+
+On all of them, GPU, M.2, U.2, and PCIe slots can fight for lanes and cause strange enumeration. Old BIOS builds, aging boards, and mixed adapter quality can waste more time than a current Intel 600/700-series CPU-direct M.2 route.
 
 #### Test flow
 
@@ -391,7 +396,7 @@ These platforms have more CPU PCIe lanes and more slot combinations, but the dow
    - adapter second;
    - BIOS setting third.
 5. If enumeration looks wrong, stop and re-check the lane sharing, adapter, and slot route before changing BIOS settings.
-6. If you are buying hardware today, return to the Intel 600/700-series route first instead of chasing X99/X299 board variance.
+6. If you are buying hardware today, return to the Intel 600/700-series route first instead of chasing old-platform board variance.
 
 ### AMD and older fallback boards
 
@@ -478,7 +483,7 @@ Keep a small table while testing:
 | ACS comparison | Enabled | Disabled | Same as baseline | Checks whether ACS is part of the blocking path. |
 | Recovery | Original value | Original value | Original value | Confirms the board can return to a known-good state. |
 
-#### B85 and older platforms
+#### B85, Z97, and older platforms
 
 - prefer a full ATX board;
 - test from the CPU x16 main slot first;
@@ -1846,7 +1851,7 @@ Then test:
 - Intel is the low-end-board route: start with H610/B660/B760 and only use Z690/Z790 when it is a low-end/cut-down board with a clear CPU-direct route.
 - On cut-down B660/B760/Z690/Z790 boards, test the oldest official BIOS before assuming the route is impossible.
 - For the cut-down Intel 600/700 route, disable PCH-FW/PTT and VMD before testing the adapter.
-- Use X99/X299 only as an existing lab platform; do not make it the current first-choice route.
+- Use X99/X299/X399/B85/Z97 only as existing lab platforms; do not make them the current first-choice route.
 - On protected-variable boards, check PCIe ATS first.
 - On B760/B450-style routes, check middle-layer blocking and default locking first.
 - Keep VT-d enabled for visibility, but set pre-boot IOMMU behavior to disabled when using the cut-down Intel 600/700 route.
